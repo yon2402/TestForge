@@ -1,0 +1,26 @@
+{
+  "name": "testforge",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pruebas de UI, API y seguridad en una sola app",
+  "scripts": {
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "dev": "concurrently -n api,worker,web -c blue,magenta,green \"pnpm --filter @testforge/api dev\" \"pnpm --filter @testforge/worker dev\" \"pnpm --filter @testforge/web dev\"",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "ui:browsers": "pnpm --filter @testforge/engine-ui browsers",
+    "cli": "pnpm --filter @testforge/cli testforge"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.6.3"
+  },
+  "packageManager": "pnpm@10.28.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "msgpackr-extract"
+    ]
+  }
+}

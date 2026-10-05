@@ -1,0 +1,13 @@
+{
+  "name": "@testforge/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "testforge": "./bin.mjs" },
+  "scripts": {
+    "testforge": "tsx src/index.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": { "@testforge/shared": "workspace:*" },
+  "devDependencies": { "@types/node": "^22.9.0", "tsx": "^4.19.2" }
+}

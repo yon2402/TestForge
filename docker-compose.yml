@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: testforge
+      POSTGRES_PASSWORD: testforge
+      POSTGRES_DB: testforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+  # OWASP ZAP: escáner de seguridad. Modo daemon, controlado por su API.
+  # Solo debe usarse contra sistemas propios o autorizados.
+  zap:
+    image: zaproxy/zap-stable
+    command: zap.sh -daemon -host 0.0.0.0 -port 8090 -config api.disablekey=true -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true
+    ports:
+      - "8090:8090"
+volumes:
+  pgdata:
