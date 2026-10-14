@@ -108,6 +108,8 @@ export async function migrate() {
     ALTER TABLE run_results ADD COLUMN IF NOT EXISTS browser text;
     ALTER TABLE run_results ADD COLUMN IF NOT EXISTS attachments jsonb NOT NULL DEFAULT '[]';
     ALTER TABLE run_results ADD COLUMN IF NOT EXISTS steps jsonb NOT NULL DEFAULT '[]';
+    ALTER TABLE run_results ADD COLUMN IF NOT EXISTS user_agent text;
+    ALTER TABLE run_results ADD COLUMN IF NOT EXISTS code text;
     ALTER TABLE run_results ALTER COLUMN request DROP NOT NULL;
     CREATE INDEX IF NOT EXISTS run_results_run_idx ON run_results(run_id, position);
     CREATE INDEX IF NOT EXISTS runs_project_idx ON runs(project_id, created_at DESC);

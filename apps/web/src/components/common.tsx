@@ -242,8 +242,22 @@ export function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-// ---------- Resultado de una prueba UI: error, pasos, captura, video y traza ----------
-export function UiResultView({ result }: { result: { error: string | null; steps: UiStep[]; attachments: UiAttachment[]; status: string } }) {
+// Deduce el motor de renderizado real a partir del User-Agent del navegador.
+// Chrome/Chromium → Blink; Firefox → Gecko; Safari/WebKit → WebKit.
+// (El UA de Chrome también contiene "Safari", por eso Firefox y Chrome se revisan antes.)
+export function engineFromUA(ua: string | null | undefined): { engine: string; label: string; version: string | null } | null {
+  if (!ua) return null;
+  const v = (re: RegExp) => ua.match(re)?.[1] ?? null;
+  if (/Firefox\//.test(ua)) return { engine: "gecko", label: "Gecko", version: v(/Firefox\/([\d.]+)/) };
+  if (/Edg\//.test(ua)) return { engine: "blink", label: "Blink", version: v(/Edg\/([\d.]+)/) };
+  if (/Chrome\//.test(ua)) return { engine: "blink", label: "Blink", version: v(/Chrome\/([\d.]+)/) };
+  if (/AppleWebKit\//.test(ua)) return { engine: "webkit", label: "WebKit", version: v(/Version\/([\d.]+)/) };
+  return { engine: "otro", label: "Motor", version: null };
+}
+
+// ---------- Resultado de una prueba UI: motor real, error, pasos, captura, video y traza ----------
+export function UiResultView({ result }: { result: { error: string | null; steps: UiStep[]; attachments: UiAttachment[]; status: string; userAgent?: string | null; browser?: string | null; code?: string | null } }) {
+  const eng = engineFromUA(result.userAgent);
   const shot = result.attachments.find((a) => a.contentType === "image/png");
   const video = result.attachments.find((a) => a.contentType.startsWith("video/"));
   const trace = result.attachments.find((a) => a.name === "trace");
@@ -252,18 +266,40 @@ export function UiResultView({ result }: { result: { error: string | null; steps
   const steps = result.steps.filter((s) => !/^(Before|After) Hooks$/.test(s.title));
   return (
     <div className="ui-result">
+      {result.userAgent ? (
+        <div className="engine-proof">
+          {eng && <span className={`engine-tag engine-${eng.engine}`}>Motor {eng.label}{eng.version ? ` ${eng.version}` : ""}</span>}
+          <span className="muted small">Ejecutado de verdad en este motor — User-Agent del navegador:</span>
+          <code className="ua-string">{result.userAgent}</code>
+        </div>
+      ) : (
+        <div className="engine-proof muted small">
+          No se capturó el User-Agent (la prueba no llegó a abrir una página en el navegador).
+        </div>
+      )}
+      {result.code && (
+        <details className="code-run" open={result.status !== "passed"}>
+          <summary>Código ejecutado</summary>
+          <pre className="code code-block"><code>{result.code}</code></pre>
+        </details>
+      )}
       {result.error && <pre className="code error-pre">{result.error}</pre>}
-      {steps.length > 0 && (
-        <details className="steps" open={result.status !== "passed"}>
-          <summary>Pasos ({steps.length})</summary>
-          <ol>
+      {steps.length > 0 ? (
+        <details className="steps" open>
+          <summary>Pasos ejecutados ({steps.length})</summary>
+          <ol className="steps-list">
             {steps.map((s, i) => (
-              <li key={i} className={s.error ? "ko" : ""}>
-                <span>{s.title}</span> <span className="muted">{s.durationMs} ms</span>
+              <li key={i} className={s.error ? "ko" : "ok"}>
+                <span className="step-mark">{s.error ? "✗" : "✓"}</span>
+                <span className="step-title">{s.title}</span>
+                <span className="muted step-time">{s.durationMs} ms</span>
+                {s.error && <div className="step-error">{s.error.split("\n")[0]}</div>}
               </li>
             ))}
           </ol>
         </details>
+      ) : (
+        result.status === "passed" && <p className="muted small">La prueba pasó. No se registraron pasos (código sin acciones de Playwright).</p>
       )}
       <div className="media">
         {shot && (

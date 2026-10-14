@@ -21,6 +21,7 @@ export type UiTestResult = {
   durationMs: number;
   error: string | null;
   errorStack: string | null;
+  userAgent: string | null; // User-Agent real del navegador que ejecutó la prueba
   attachments: UiAttachment[]; // rutas relativas a artifactsRoot
   steps: UiStep[];
 };
@@ -63,13 +64,22 @@ export function buildSpec(test: UiTestInput): string {
 // Variables del entorno seleccionado: vars.usuario, vars.password…
 const vars: Record<string, string> = JSON.parse(process.env.TF_VARS ?? "{}");
 
+// Deja constancia del motor REAL usado (User-Agent del navegador), pase o falle la prueba.
+// Así el reporte demuestra que cada navegador es distinto aunque la captura se vea igual.
+test.afterEach(async ({ page }, testInfo) => {
+  try {
+    const ua = await page.evaluate(() => navigator.userAgent);
+    testInfo.annotations.push({ type: "tf-ua", description: ua });
+  } catch {}
+});
+
 test(${JSON.stringify(test.name)}, { annotation: { type: "tf-id", description: ${JSON.stringify(test.id)} } }, async ({ page, context, request, baseURL }) => {
 ${body}
 });
 `;
 }
 
-const SPEC_HEADER_LINES = 6; // líneas del spec antes del código del tester
+const SPEC_HEADER_LINES = 15; // líneas del spec antes del código del tester
 
 /** Revisa la sintaxis de una prueba sin ejecutarla. Devuelve el mensaje de error o null. */
 export function checkSyntax(test: UiTestInput): string | null {
@@ -89,8 +99,8 @@ export function checkSyntax(test: UiTestInput): string | null {
   return `Error de sintaxis: ${msg}`;
 }
 
-export function buildConfig(opts: { outputDir: string; reportFile: string; browsers: Browser[]; baseURL?: string;
-  testTimeoutMs: number; workers: number; headless: boolean }): string {
+export function buildConfig(opts: { outputDir: string; reportFile: string; stepsReporter: string; stepsFile: string;
+  browsers: Browser[]; baseURL?: string; testTimeoutMs: number; workers: number; headless: boolean }): string {
   const projects = opts.browsers
     .map((b) => `    { name: ${JSON.stringify(b)}, use: { ...devices[${JSON.stringify(DEVICES[b])}] } },`)
     .join("\n");
@@ -103,7 +113,10 @@ export default {
   timeout: ${opts.testTimeoutMs},
   workers: ${opts.workers},
   retries: 0,
-  reporter: [["json", { outputFile: ${JSON.stringify(opts.reportFile)} }]],
+  reporter: [
+    ["json", { outputFile: ${JSON.stringify(opts.reportFile)} }],
+    [${JSON.stringify(opts.stepsReporter)}, { outputFile: ${JSON.stringify(opts.stepsFile)} }],
+  ],
   use: {
     baseURL: ${opts.baseURL ? JSON.stringify(opts.baseURL) : "undefined"},
     headless: ${opts.headless},
@@ -141,7 +154,7 @@ function collectSpecs(suites: PwSuite[] = [], out: PwSpec[] = []): PwSpec[] {
   return out;
 }
 
-export function parseReport(report: PwReport, tests: UiTestInput[], browsers: Browser[], artifactsRoot: string): UiTestResult[] {
+export function parseReport(report: PwReport, tests: UiTestInput[], browsers: Browser[], artifactsRoot: string, stepsMap?: Map<string, UiStep[]>): UiTestResult[] {
   const byId = new Map(tests.map((t) => [t.id, t]));
   const results: UiTestResult[] = [];
   const seen = new Set<string>();
@@ -149,6 +162,7 @@ export function parseReport(report: PwReport, tests: UiTestInput[], browsers: Br
   for (const spec of collectSpecs(report.suites)) {
     for (const t of spec.tests) {
       const id = t.annotations?.find((a) => a.type === "tf-id")?.description ?? "";
+      const userAgent = t.annotations?.find((a) => a.type === "tf-ua")?.description ?? null;
       const r = t.results.at(-1);
       const err = r?.error ?? r?.errors?.[0];
       const status: UiTestResult["status"] = !r ? "skipped"
@@ -164,10 +178,12 @@ export function parseReport(report: PwReport, tests: UiTestInput[], browsers: Br
         durationMs: Math.round(r?.duration ?? 0),
         error: err?.message ? stripAnsi(err.message).trim() : r?.status === "timedOut" ? "Tiempo de espera agotado" : null,
         errorStack: err?.stack ? stripAnsi(err.stack) : null,
+        userAgent,
         attachments: (r?.attachments ?? [])
           .filter((a) => a.path)
           .map((a) => ({ name: a.name, contentType: a.contentType, path: relative(artifactsRoot, a.path!).split(sep).join("/") })),
-        steps: (r?.steps ?? []).map((s) => ({ title: s.title, durationMs: Math.round(s.duration), error: s.error?.message ? stripAnsi(s.error.message) : null })),
+        steps: stepsMap?.get(`${id}|${t.projectName}`)
+          ?? (r?.steps ?? []).map((s) => ({ title: s.title, durationMs: Math.round(s.duration), error: s.error?.message ? stripAnsi(s.error.message) : null })),
       });
     }
   }
@@ -178,7 +194,7 @@ export function parseReport(report: PwReport, tests: UiTestInput[], browsers: Br
     for (const b of browsers) {
       if (seen.has(`${t.id}|${b}`)) continue;
       results.push({ testId: t.id, name: t.name, browser: b, status: "error", durationMs: 0,
-        error: globalError || "La prueba no se ejecutó (revisa la sintaxis del código)", errorStack: null, attachments: [], steps: [] });
+        error: globalError || "La prueba no se ejecutó (revisa la sintaxis del código)", errorStack: null, userAgent: null, attachments: [], steps: [] });
     }
   }
   const order = new Map(tests.map((t, i) => [t.id, i]));
@@ -189,6 +205,7 @@ export async function runUiTests(opts: UiRunOptions): Promise<{ results: UiTestR
   const workDir = resolve(RUNS_DIR, opts.runId);
   const outputDir = resolve(opts.artifactsRoot, opts.runId);
   const reportFile = resolve(workDir, "report.json");
+  const stepsFile = resolve(workDir, "steps.json");
   await rm(workDir, { recursive: true, force: true });
   await mkdir(workDir, { recursive: true });
   await mkdir(outputDir, { recursive: true });
@@ -197,13 +214,14 @@ export async function runUiTests(opts: UiRunOptions): Promise<{ results: UiTestR
   const runnable = opts.tests.filter((t) => !syntaxErrors.has(t.id));
   const invalid: UiTestResult[] = opts.tests.filter((t) => syntaxErrors.has(t.id)).flatMap((t) =>
     opts.browsers.map((b) => ({ testId: t.id, name: t.name, browser: b, status: "error" as const, durationMs: 0,
-      error: syntaxErrors.get(t.id)!, errorStack: null, attachments: [], steps: [] })));
+      error: syntaxErrors.get(t.id)!, errorStack: null, userAgent: null, attachments: [], steps: [] })));
   if (runnable.length === 0) return { results: invalid, log: "" };
 
   await Promise.all(runnable.map((t, i) => writeFile(resolve(workDir, `t${String(i).padStart(3, "0")}.spec.ts`), buildSpec(t))));
   const configFile = resolve(workDir, "playwright.config.mjs");
   await writeFile(configFile, buildConfig({
-    outputDir, reportFile, browsers: opts.browsers, baseURL: opts.baseURL || undefined,
+    outputDir, reportFile, stepsReporter: resolve(here, "stepsReporter.mjs"), stepsFile,
+    browsers: opts.browsers, baseURL: opts.baseURL || undefined,
     testTimeoutMs: opts.testTimeoutMs ?? 60_000, workers: opts.workers ?? 2, headless: opts.headless ?? true,
   }));
 
@@ -231,8 +249,14 @@ export async function runUiTests(opts: UiRunOptions): Promise<{ results: UiTestR
       : "Playwright no generó reporte";
     report = { errors: [{ message: `${hint}\n\n${log.slice(-3000)}` }] };
   }
+  let stepsMap: Map<string, UiStep[]> | undefined;
+  try {
+    const raw = JSON.parse(await readFile(stepsFile, "utf8")) as Record<string, UiStep[]>;
+    stepsMap = new Map(Object.entries(raw));
+  } catch { stepsMap = undefined; }
+
   const order = new Map(opts.tests.map((t, i) => [t.id, i]));
-  const results = [...parseReport(report, runnable, opts.browsers, opts.artifactsRoot), ...invalid]
+  const results = [...parseReport(report, runnable, opts.browsers, opts.artifactsRoot, stepsMap), ...invalid]
     .sort((a, b) => (order.get(a.testId) ?? 0) - (order.get(b.testId) ?? 0) || a.browser.localeCompare(b.browser));
   if (/Executable doesn't exist/i.test(log)) {
     for (const r of results) if (r.status !== "passed") r.error = `Faltan los navegadores de Playwright. Ejecuta: pnpm ui:browsers\n\n${r.error ?? ""}`;

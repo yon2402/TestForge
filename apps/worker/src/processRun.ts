@@ -84,11 +84,14 @@ async function processUiRun(runId: string, run: Row, project: Row, variables: Re
   });
   if (results.length === 0) throw new Error(`Playwright no devolvió resultados.\n${log.slice(-2000)}`);
 
+  // Copia del código en el momento de ejecutar, para verlo en el reporte aunque luego se edite o borre la prueba
+  const codeById = new Map(tests.map((t) => [t.id, t.code]));
+
   for (const [position, r] of results.entries()) {
     await sql`insert into run_results
-      (run_id, request_id, position, name, status, duration_ms, kind, browser, attachments, steps, error)
+      (run_id, request_id, position, name, status, duration_ms, kind, browser, attachments, steps, error, user_agent, code)
       values (${runId}, ${r.testId || null}, ${position}, ${r.name}, ${r.status}, ${r.durationMs}, 'ui', ${r.browser},
-              ${sql.json(r.attachments)}, ${sql.json(r.steps as never)}, ${r.error})`;
+              ${sql.json(r.attachments)}, ${sql.json(r.steps as never)}, ${r.error}, ${r.userAgent ?? null}, ${codeById.get(r.testId) ?? null})`;
   }
   // summarize espera la forma de los resultados de API; solo usa status
   return summarize(results.map((r) => ({ status: r.status })) as never, Date.now() - started);

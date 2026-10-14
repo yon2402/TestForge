@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import type { RequestResult, UiBrowser } from "@testforge/shared";
 import { api, type Project, type Run, type RunDetail } from "../api";
-import { ResultView, StatusBadge, UiResultView } from "./common";
+import { ResultView, StatusBadge, UiResultView, engineFromUA } from "./common";
 import { BROWSER_LABELS, BrowserPicker } from "./UiTestsView";
 import { LoadDashboard } from "./LoadReport";
 import { SecurityReportView } from "./SecurityReport";
@@ -176,7 +176,12 @@ function RunReport({ runId, refreshKey, onDelete }: { runId: string; refreshKey?
                   <>
                     <td><span className="method m-UI">UI</span> {r.name}</td>
                     <td><StatusBadge status={r.status} /></td>
-                    <td>{BROWSER_LABELS[r.browser as UiBrowser] ?? r.browser}</td>
+                    <td>
+                      {BROWSER_LABELS[r.browser as UiBrowser] ?? r.browser}
+                      {(() => { const e = engineFromUA(r.userAgent); return e
+                        ? <div className={`engine-tag engine-${e.engine} mini`}>{e.label}{e.version ? ` ${e.version.split(".")[0]}` : ""}</div>
+                        : null; })()}
+                    </td>
                     <td>{r.durationMs} ms</td>
                     <td className="muted small">{r.error ? r.error.split("\n")[0].slice(0, 70) : `${r.attachments.length} adjuntos`}</td>
                   </>

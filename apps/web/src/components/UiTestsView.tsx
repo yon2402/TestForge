@@ -3,7 +3,7 @@ import { uiBrowsers, type UiBrowser, type UiTestInput } from "@testforge/shared"
 import { api, type Project, type RunDetail, type UiTest } from "../api";
 import { CodeEditor } from "./CodeEditor";
 import { forget, usePersistentState } from "../store";
-import { StatusBadge } from "./common";
+import { StatusBadge, engineFromUA } from "./common";
 
 const STARTER = `await page.goto("/");
 await expect(page).toHaveTitle(/.+/);
@@ -249,8 +249,11 @@ function UiTestEditor({ project, saved, environmentId, browsers, onBrowsers, onO
               <span className="muted">Última ejecución:</span>
               {run.error && <StatusBadge status="error" />}
               {run.results.map((r) => (
-                <span key={r.id} className="run-status-item" title={r.error ?? ""}>
+                <span key={r.id} className="run-status-item" title={r.userAgent ?? r.error ?? ""}>
                   <StatusBadge status={r.status} /> {BROWSER_LABELS[r.browser as UiBrowser] ?? r.browser}
+                  {(() => { const e = engineFromUA(r.userAgent); return e
+                    ? <span className={`engine-tag engine-${e.engine} mini`} style={{ marginLeft: 6 }}>{e.label}</span>
+                    : null; })()}
                 </span>
               ))}
             </>

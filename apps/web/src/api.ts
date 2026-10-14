@@ -13,7 +13,7 @@ export type Run = {
 export type StoredResult = Omit<RequestResult, "request"> & {
   id: string; position: number; kind: RunKind; browser: string | null;
   request: RequestResult["request"] | null;
-  attachments: UiAttachment[]; steps: UiStep[];
+  attachments: UiAttachment[]; steps: UiStep[]; userAgent: string | null; code: string | null;
 };
 export type RunDetail = Run & { projectName: string; results: StoredResult[] };
 
